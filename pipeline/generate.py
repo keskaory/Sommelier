@@ -9,6 +9,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import certifi
 import duckdb
@@ -16,9 +17,8 @@ from dotenv import load_dotenv
 
 DB_PATH = "data/sommelier.duckdb"
 CACHE_DIR = "data/cache"
-# shortcut: answers stop at 1024 tokens to stay inside free-tier budgets, same cap for both models.
-# 512 cut off 2 of the first 3 test answers, way too many.
-MAX_TOKENS = 1024
+# gemma 4's thinking counts against this. at 1024 all 9 trial answers got cut off, at 4096 none did
+MAX_TOKENS = 4096
 MAX_RETRIES = 5
 
 
@@ -35,12 +35,14 @@ def model_config(role):
         "model": os.environ[f"{prefix}_MODEL"],
         "api_key": os.environ.get(f"{prefix}_API_KEY", "none"),
         "rpm": int(os.environ.get(f"{prefix}_RPM", "20")),
+        "workers": int(os.environ.get(f"{prefix}_WORKERS", "1")),
     }
 
 
 def cache_key(model, prompt):
-    # model + prompt, so the same call never happens twice
-    return hashlib.md5(f"{model}\n{prompt}".encode()).hexdigest()
+    # model + token cap + prompt, so the same call never happens twice,
+    # and changing the cap doesn't reuse answers that got cut off under the old one
+    return hashlib.md5(f"{model}\n{MAX_TOKENS}\n{prompt}".encode()).hexdigest()
 
 
 def load_cache(path):
@@ -84,7 +86,8 @@ def call_chat(config, prompt):
     )
     # python.org's mac python ships with no trusted certs, so every https call fails without this
     context = ssl.create_default_context(cafile=certifi.where())
-    with urllib.request.urlopen(request, timeout=120, context=context) as response:
+    # calls took up to 260s in testing. a shorter timeout just retries and pays for the tokens again
+    with urllib.request.urlopen(request, timeout=360, context=context) as response:
         raw = response.read()
     try:
         return json.loads(raw)
@@ -139,30 +142,58 @@ def parse_response(data):
     }
 
 
-def generate(con, role, limit=None, call=call_chat, cache_dir=CACHE_DIR):
+def load_rows(con):
+    return con.execute("select conversation_hash, prompt from eval_set order by conversation_hash").fetchall()
+
+
+def run_calls(role, rows, limit=None, call=call_chat, cache_dir=CACHE_DIR):
+    # returns the cache after making every call that isn't cached yet
     config = model_config(role)
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, f"{role}.jsonl")
     cache = load_cache(cache_path)
-    rows = con.execute("select conversation_hash, prompt from eval_set order by conversation_hash").fetchall()
     todo = [(h, p) for h, p in rows if cache_key(config["model"], p) not in cache]
     print(f"{role}: {len(rows) - len(todo)} cached, {len(todo)} to go ({config['model']})")
     if limit is not None:
         todo = todo[:limit]
 
-    for i, (conversation_hash, prompt) in enumerate(todo):
-        try:
-            result = answer_one(config, prompt, call)
-        except StopRun as e:
-            print(f"stopped after {i} calls: {e}. rerun later, the cache picks up where this left off.")
-            break
-        key = cache_key(config["model"], prompt)
-        record = {"key": key, "conversation_hash": conversation_hash, "model": config["model"], **result}
-        append_cache(cache_path, record)
-        cache[key] = record
-        time.sleep(60 / config["rpm"])  # stay under the requests-per-minute cap
+    # one call takes 0.5-4 min but the api lets several run at once. so start a new one
+    # every 60/rpm seconds and keep up to `workers` in flight. only this thread writes the cache.
+    # ctrl-c waits for the calls in flight and those answers aren't saved, that's fine
+    stop_reason = None
+    running = {}
+    next_todo = iter(todo)
+    with ThreadPoolExecutor(max_workers=config["workers"]) as pool:
+        while True:
+            if stop_reason is None and len(running) < config["workers"]:
+                item = next(next_todo, None)
+                if item is not None:
+                    running[pool.submit(answer_one, config, item[1], call)] = item
+                    time.sleep(60 / config["rpm"])
+                    continue
+            if not running:
+                break
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in done:
+                conversation_hash, prompt = running.pop(future)
+                try:
+                    result = future.result()
+                except StopRun as e:
+                    stop_reason = str(e)  # let the calls already running finish, start no more
+                    continue
+                key = cache_key(config["model"], prompt)
+                record = {"key": key, "conversation_hash": conversation_hash, "model": config["model"], **result}
+                append_cache(cache_path, record)
+                cache[key] = record
+    if stop_reason is not None:
+        print(f"stopped: {stop_reason}. rerun later, the cache picks up where this left off.")
+    return cache, config["model"]
 
-    write_answers(con, role, config["model"], rows, cache)
+
+def generate(con, role, limit=None, call=call_chat, cache_dir=CACHE_DIR):
+    rows = load_rows(con)
+    cache, model = run_calls(role, rows, limit, call, cache_dir)
+    write_answers(con, role, model, rows, cache)
 
 
 def strip_thoughts(raw):
@@ -197,13 +228,29 @@ def write_answers(con, role, model, rows, cache):
         con.executemany("insert into answers values (?, ?, ?, ?, ?, ?, ?, ?, ?)", records)
 
 
+def connect_db(path, read_only=False):
+    # small and large run as two processes. duckdb lets only one write at a time, so if the
+    # other one is mid-write, wait a bit. every answer is already in the cache either way.
+    for _ in range(10):
+        try:
+            return duckdb.connect(path, read_only=read_only)
+        except duckdb.IOException:
+            time.sleep(5)
+    raise SystemExit("db is busy. rerun, everything is cached so it makes no new calls")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("role", choices=["small", "large"])
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
-    con = duckdb.connect(DB_PATH)
-    generate(con, args.role, args.limit)
+    # don't hold the db open for hours, so small and large can run at the same time
+    con = connect_db(DB_PATH, read_only=True)
+    rows = load_rows(con)
+    con.close()
+    cache, model = run_calls(args.role, rows, args.limit)
+    con = connect_db(DB_PATH)
+    write_answers(con, args.role, model, rows, cache)
     print(con.execute("""
         select role, model, count(*) answers, count(error) errors,
                count(*) filter (where finish_reason = 'length') cut_off
