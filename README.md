@@ -20,5 +20,14 @@ python -m pipeline.load_prompts
 python -m pipeline.segments
 python -m pipeline.split
 python -m pipeline.eval_set
+python -m pipeline.generate small
+python -m pipeline.generate large
 ```
-run them in this order. each step rebuilds the `prompts` table from the one before.
+run them in this order. each step builds on the one before.
+generation needs a google ai studio key in `.env` (see `.env.example`). it's slow and stops at daily caps, rerunning picks up from the cache.
+
+to hand-label answer pairs, once generation is done:
+```
+python -m pipeline.label_set
+streamlit run app/label.py
+```
