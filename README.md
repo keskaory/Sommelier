@@ -19,5 +19,6 @@ to rebuild the prompt table, download shards `train-00000-of-00014.parquet` and 
 python -m pipeline.load_prompts
 python -m pipeline.segments
 python -m pipeline.split
+python -m pipeline.eval_set
 ```
 run them in this order. each step rebuilds the `prompts` table from the one before.
