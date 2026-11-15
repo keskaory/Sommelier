@@ -116,13 +116,16 @@ def answer_one(config, prompt, call):
             if e.code != 429 and e.code < 500:
                 return {"answer": None, "error": f"http {e.code}"}
             error = e
+            # google's 429 body names the quota it hit (per minute vs per day), keep it for the stop message
+            last_seen = f"http {e.code}: {e.read()[:300].decode(errors='replace')}"
         except OSError as e:  # dropped connection, timeout, refused
             error = e
+            last_seen = repr(e)
         else:
             return parse_response(data)
         if attempt < MAX_RETRIES - 1:
             time.sleep(wait_seconds(error, attempt))
-    raise StopRun("still rate limited or the server is down (likely the daily cap)")
+    raise StopRun(f"still rate limited or the server is down. last error: {last_seen}")
 
 
 def parse_response(data):
