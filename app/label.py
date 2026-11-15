@@ -100,6 +100,9 @@ def main():
     a_answer, b_answer = (small_answer, large_answer) if a_role == "small" else (large_answer, small_answer)
 
     st.caption(f"segment: {segment}")
+    # same bar the judge gets in pipeline/judge.py, so we grade against the same thing
+    st.caption("good enough = does what was asked, is correct, and a typical user wouldn't need to ask again. "
+               "length and style don't matter unless asked for. empty or stopped mid-sentence = no.")
     with st.expander("prompt", expanded=True):
         st.text(prompt)
     left, right = st.columns(2)

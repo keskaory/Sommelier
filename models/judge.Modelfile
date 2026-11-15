@@ -1,0 +1,6 @@
+# the local judge: qwen 2.5 7b (a different family from the gemma models it grades).
+# ollama defaults to a short context and silently cuts long inputs, so set 8k here.
+# build it once: ollama create sommelier-judge -f models/judge.Modelfile
+FROM qwen2.5:7b
+PARAMETER num_ctx 8192
+PARAMETER temperature 0
