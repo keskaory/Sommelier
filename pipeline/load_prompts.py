@@ -5,8 +5,8 @@ import duckdb
 RAW_GLOB = "data/raw/*.parquet"
 DB_PATH = "data/sommelier.duckdb"
 SAMPLE_SIZE = 20_000
-# chinese, japanese, korean and cyrillic letters. wildchat tags some of these prompts english.
-NON_LATIN = r"[\x{4e00}-\x{9fff}\x{3040}-\x{30ff}\x{ac00}-\x{d7af}\x{0400}-\x{04ff}]"
+# chinese, japanese, korean, cyrillic and arabic-script letters. wildchat tags some of these prompts english.
+NON_LATIN = r"[\x{4e00}-\x{9fff}\x{3040}-\x{30ff}\x{ac00}-\x{d7af}\x{0400}-\x{04ff}\x{0600}-\x{06ff}]"
 
 
 def load_first_prompts(con, parquet_glob):

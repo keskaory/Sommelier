@@ -34,6 +34,7 @@ def con(tmp_path):
         make_row("h", "assistant spoke first", role="assistant"),
         make_row("i", "润色如下内容：我们的报告总结了很多数据", ts="2023-05-03"),  # mostly chinese, tagged english
         make_row("j", "what does 你好 mean?"),  # english with a little chinese, should stay
+        make_row("m", "لطفا متن زیر را بازنویسی کن"),  # persian, tagged english
         make_row("k", TEMPLATE + "a cat on the moon", ts="2023-05-04"),
         make_row("l", TEMPLATE + "a dog in the rain", ts="2023-05-05"),  # same template, later
     ]
