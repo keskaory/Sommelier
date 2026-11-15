@@ -1,4 +1,4 @@
-# switchboard
+# sommelier
 
 an llm router that sends each prompt to a cheap or expensive model, and a proper eval to prove it saves money without hurting quality.
 
@@ -10,4 +10,11 @@ sh scripts/setup.sh
 source .venv/bin/activate
 pytest
 ```
-# Sommelier
+
+## data
+prompts come from [wildchat-1m](https://huggingface.co/datasets/allenai/WildChat-1M) (allen ai, odc-by license). this public version already has toxic conversations removed. i also drop any conversation wildchat flagged as containing pii (`redacted`), even though it was anonymized.
+
+to rebuild the prompt table, download shards `train-00000-of-00014.parquet` and `train-00007-of-00014.parquet` from the link above into `data/raw/`, then:
+```
+python -m pipeline.load_prompts
+```

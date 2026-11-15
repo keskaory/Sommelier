@@ -1,0 +1,20 @@
+# private stuff, never pushed
+journal/
+CLAUDE.md
+.claude/
+
+# data and caches
+data/
+*.duckdb
+*.parquet
+cache/
+
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv
+.pytest_cache/
+.ipynb_checkpoints/
