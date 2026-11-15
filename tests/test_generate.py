@@ -140,3 +140,10 @@ def test_garbled_response_is_cached_as_bad_response(con, tmp_path):
 def test_huge_retry_after_is_capped():
     error = urllib.error.HTTPError("http://fake", 429, "daily cap", {"Retry-After": "86400"}, io.BytesIO(b""))
     assert gen.wait_seconds(error, attempt=0) == 600
+
+
+def test_thoughts_are_stripped_from_the_answer():
+    assert gen.strip_thoughts("<thought>* topic: x</thought>\n\nA hash table maps keys.") == "A hash table maps keys."
+    assert gen.strip_thoughts("no thinking here") == "no thinking here"
+    assert gen.strip_thoughts("<thought>still going when it got cut off") == ""
+    assert gen.strip_thoughts(None) is None

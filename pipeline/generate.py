@@ -4,10 +4,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import ssl
 import time
 import urllib.error
 import urllib.request
 
+import certifi
 import duckdb
 from dotenv import load_dotenv
 
@@ -79,7 +82,9 @@ def call_chat(config, prompt):
         data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {config['api_key']}"},
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
+    # python.org's mac python ships with no trusted certs, so every https call fails without this
+    context = ssl.create_default_context(cafile=certifi.where())
+    with urllib.request.urlopen(request, timeout=120, context=context) as response:
         raw = response.read()
     try:
         return json.loads(raw)
@@ -160,6 +165,16 @@ def generate(con, role, limit=None, call=call_chat, cache_dir=CACHE_DIR):
     write_answers(con, role, config["model"], rows, cache)
 
 
+def strip_thoughts(raw):
+    # gemma 4 writes its reasoning in <thought>...</thought> before the answer and it can't
+    # be turned off. the judge should only see the answer. the cache keeps the raw reply.
+    if raw is None:
+        return None
+    if "<thought>" in raw and "</thought>" not in raw:
+        return ""  # cut off mid-thought, there's no answer
+    return re.sub(r"<thought>.*?</thought>", "", raw, flags=re.DOTALL).strip()
+
+
 def write_answers(con, role, model, rows, cache):
     # error rows have answer = null, filter on `error is null` later
     records = []
@@ -167,7 +182,7 @@ def write_answers(con, role, model, rows, cache):
         record = cache.get(cache_key(model, prompt))
         if record is not None:
             records.append((conversation_hash, role, model, record.get("model_reported"),
-                            record.get("answer"), record.get("finish_reason"),
+                            strip_thoughts(record.get("answer")), record.get("finish_reason"),
                             record.get("prompt_tokens"), record.get("completion_tokens"), record.get("error")))
     # not create or replace, that would wipe the other model's answers
     con.execute("""
