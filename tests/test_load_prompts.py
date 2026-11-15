@@ -1,4 +1,4 @@
-# tests for pipeline/load_prompts.py, using a tiny fake wildchat file so they run in a second.
+# load_prompts.py on a tiny fake wildchat file
 import duckdb
 import pandas as pd
 import pytest

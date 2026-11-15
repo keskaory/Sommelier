@@ -1,4 +1,4 @@
-# tests for pipeline/split.py: same user always lands in one split, and the split sizes are roughly 40/20/40.
+# split.py: one split per user, roughly 40/20/40
 import duckdb
 
 from pipeline.split import add_splits, split_for

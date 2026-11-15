@@ -1,5 +1,4 @@
-# step 2 of the pipeline: tag each prompt with a task type (coding, math, chit-chat, writing, q&a, other).
-# reads the `prompts` table from step 1 and adds a `segment` column. the eval set is stratified on it.
+# tags each prompt as coding, math, chit-chat, writing, q&a or other. the eval set is stratified on this.
 import re
 
 import duckdb
@@ -7,14 +6,11 @@ import duckdb
 DB_PATH = "data/sommelier.duckdb"
 HEAD_CHARS = 200
 
-# c++ and c# sit outside the \b(...)\b group because \b needs a letter after the ++.
-# rules are checked top to bottom and the first match wins, so order matters.
-# coding goes first because "write a python function" is coding, not writing.
-# math before writing so "write an equation" counts as math.
-# chit-chat before q&a so "how are you?" isn't a question about something.
+# first match wins, so order matters: coding first ("write a python function"), math before
+# writing ("write an equation"), chit-chat before q&a ("how are you?").
+# c++ and c# are outside the \b group because \b doesn't work after a "+".
 RULES = [
-    # class/import/function only count with code punctuation around them,
-    # otherwise "how to import a truck" and "my english class" end up as coding.
+    # class/import/function need code punctuation, otherwise "how to import a truck" is coding
     ("coding", r"```|#include|\bc\+\+|\bc#|\bdef \w+\(|\bfunction\s*\w*\s*\(|\bclass \w+\s*(\{|\(|:\s*(\n|$))|"
                r"(^|\n)\s*(import [\w.]+|from [\w.]+ import)|<script|"
                r"\b(python|javascript|typescript|java|sql|html|css|vba|php|golang|rust|kotlin|swift|"
@@ -34,8 +30,8 @@ RULES = [
 
 
 def segment_for(prompt):
-    # only look at the start. the ask is almost always up front, and long pasted docs
-    # mention "calculate" or "error" somewhere and got mis-tagged when we read all of it.
+    # first 200 chars only. the ask is usually up front, and long pasted docs kept getting
+    # tagged math or coding over some random word deep inside
     text = (prompt or "").lower().strip()[:HEAD_CHARS]
     for segment, pattern in RULES:
         if re.search(pattern, text):
@@ -46,8 +42,8 @@ def segment_for(prompt):
 def add_segments(con):
     df = con.execute("select conversation_hash, prompt from prompts").df()
     df["segment"] = df["prompt"].apply(segment_for)
-    # rebuild prompts with the new column instead of altering it, so a rerun just overwrites.
-    # duckdb can read the pandas df by its variable name. conversation_hash is unique, so the join can't add rows.
+    # rebuild the table so rerunning just overwrites it. duckdb reads `df` straight from python.
+    # conversation_hash is unique so the join can't add rows.
     con.execute("""
         create or replace table prompts as
         select p.conversation_hash, p.hashed_ip, p.timestamp, p.prompt, df.segment

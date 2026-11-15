@@ -1,19 +1,17 @@
-# step 1 of the pipeline: turn raw wildchat parquet shards into a clean table of ~20k prompts.
-# everything later (segments, eval set, router) reads the `prompts` table this writes.
+# turns the raw wildchat shards into a `prompts` table of 20k english prompts. everything after reads it.
 import duckdb
 
 RAW_GLOB = "data/raw/*.parquet"
 DB_PATH = "data/sommelier.duckdb"
 SAMPLE_SIZE = 20_000
-# chinese, japanese, korean, cyrillic and arabic-script letters. wildchat tags some of these prompts english.
+# cjk, cyrillic and arabic letters. wildchat tags some of these prompts as english
 NON_LATIN = r"[\x{4e00}-\x{9fff}\x{3040}-\x{30ff}\x{ac00}-\x{d7af}\x{0400}-\x{04ff}\x{0600}-\x{06ff}]"
 
 
 def load_first_prompts(con, parquet_glob):
-    # first message only, mvp is single-turn. toxic is already removed upstream,
-    # but the filter is cheap insurance. redacted = pii was found, so those go too.
-    # the non-latin check drops prompts that are mostly another language but still
-    # tagged english. an english prompt quoting a little foreign text stays.
+    # first message only. toxic rows are already gone upstream, the filter's just in case.
+    # redacted = pii was found in it, so those go too.
+    # last check drops prompts that are mostly another language but tagged english.
     con.execute(f"""
         create or replace table first_prompts as
         select
@@ -33,11 +31,9 @@ def load_first_prompts(con, parquet_glob):
 
 
 def dedupe_prompts(con):
-    # two prompts count as duplicates if their first 150 chars match after lowercasing
-    # and squashing spaces. that catches copy-paste templates (one midjourney template
-    # was 11% of the sample, from 1k+ different users) that only differ at the end.
-    # keep the earliest copy so the choice doesn't depend on file order.
-    # duplicates left in would land in both train and test and inflate results.
+    # dupes = same first 150 chars after lowercasing and squashing spaces. exact match missed
+    # copy-paste templates, one midjourney template alone was 11% of the sample.
+    # keep the earliest copy. dupes left in end up in both train and test.
     con.execute("""
         create or replace table unique_prompts as
         select conversation_hash, hashed_ip, timestamp, prompt
@@ -50,8 +46,7 @@ def dedupe_prompts(con):
 
 
 def sample_prompts(con, n):
-    # ordering by a hash of the id gives the same "random" sample on every run,
-    # unlike duckdb's sample which can change with thread count.
+    # md5 order gives the same sample every run. duckdb's sample() can change with thread count
     con.execute(f"""
         create or replace table prompts as
         select conversation_hash, hashed_ip, timestamp, prompt
@@ -69,7 +64,7 @@ def main():
     for table in ["first_prompts", "unique_prompts", "prompts"]:
         count = con.execute(f"select count(*) from {table}").fetchone()[0]
         print(f"{table}: {count}")
-    # the in-between tables were only for counting, no need to keep them on disk
+    # the middle tables were only for the counts above
     con.execute("drop table first_prompts")
     con.execute("drop table unique_prompts")
     con.close()

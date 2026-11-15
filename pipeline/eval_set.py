@@ -1,18 +1,15 @@
-# step 3 of the pipeline (second half): draw the prompts we'll actually get answers for.
-# reads `prompts` (steps 1-3a) and writes `eval_set`. step 4 sends these to both models.
+# draws the 4k prompts that actually get answered. reads `prompts`, writes `eval_set`.
 import duckdb
 
 DB_PATH = "data/sommelier.duckdb"
-# test size comes from analysis/power.py: ~2k gives ~80% power if the true loss is 1 point
-# and the routed and large answers disagree on ~10% of prompts (a guess, rerun once we know).
-# val only picks a threshold and train only fits a small logistic regression, so 1k each.
+# test size from analysis/power.py: ~80% power at a 1 point loss if ~10% of answers disagree (a guess).
+# val just picks a threshold and train fits a small logistic regression, 1k each is enough.
 TARGETS = {"train": 1000, "val": 1000, "test": 2000}
 
 
 def draw_eval_set(con, targets):
-    # proportional stratified sample: inside each split, every segment keeps its real share,
-    # so the cost estimate still reflects real traffic. md5 order = same draw every run.
-    # rounding per segment means a split can come out a prompt or two off its target.
+    # each segment keeps its real share inside each split, so cost numbers match real traffic.
+    # rounding can leave a split a prompt or two off.
     con.execute(f"""
         create or replace table eval_set as
         with ranked as (

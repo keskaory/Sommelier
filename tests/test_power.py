@@ -1,4 +1,4 @@
-# sanity checks for analysis/power.py: the simulation should behave like the stats say it must.
+# checks the power sim does what the stats say it should
 import numpy as np
 import pytest
 

@@ -19,3 +19,6 @@ __pycache__/
 .venv
 .pytest_cache/
 .ipynb_checkpoints/
+
+# my local git hook, not part of the project
+scripts/hooks/

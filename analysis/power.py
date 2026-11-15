@@ -1,24 +1,21 @@
-# power check, run before any labeling: how many test prompts do we need for the
-# non-inferiority test to have a real shot at passing? it sizes the eval set in step 3.
+# power check: how many test prompts before the non-inferiority test can actually pass?
 #
-# per test prompt, compare the routed answer to the always-large answer:
-#   +1 = large was good enough, routed wasn't (we lost quality)
-#   -1 = routed was good enough, large wasn't (small got lucky)
-#    0 = same outcome
-# quality loss = mean of those. we pass if the upper end of its 95% ci is under the margin.
-# this uses a normal-approximation ci because it's fast. the real eval (step 7) uses a
-# bootstrap. for a plain mean at n >= 300 they land in the same place, fine for sizing.
+# per test prompt, routed answer vs always-large answer:
+#   +1 = large was good enough, routed wasn't
+#   -1 = routed was good enough, large wasn't
+#    0 = same
+# loss = mean of those. pass if the upper end of the 95% ci is under the margin.
+# normal ci because it's fast. the real eval uses a bootstrap, close enough for sizing.
 import numpy as np
 
-MARGIN = 0.03  # fixed in the pre-flight, 3 points on the good-enough rate
+MARGIN = 0.03  # set in the pre-flight: 3 points on the good-enough rate
 SIMS = 4000
 
 
 def chance_to_pass(n, true_loss, flip_rate, rng):
-    # flip_rate = share of prompts where routed and large disagree at all.
-    # you can't lose more than you flip, so true_loss has to fit inside flip_rate.
+    # flip_rate = share of prompts where routed and large disagree. loss can't be bigger than that
     assert 0 <= true_loss <= flip_rate <= 1
-    # split it into +1s and -1s so that (+1s - -1s) = true_loss.
+    # split the flips into +1s and -1s that net out to true_loss
     p_worse = (flip_rate + true_loss) / 2
     p_better = (flip_rate - true_loss) / 2
     counts = rng.multinomial(n, [p_worse, p_better, 1 - p_worse - p_better], size=SIMS)
@@ -26,8 +23,7 @@ def chance_to_pass(n, true_loss, flip_rate, rng):
     loss = (worse - better) / n
     # variance of a {+1, -1, 0} variable is E[d^2] - E[d]^2
     var = (worse + better) / n - loss ** 2
-    # 1.96 = upper end of a two-sided 95% ci, i.e. a one-sided test at 2.5%. that's the
-    # usual non-inferiority choice and stricter than a one-sided 95% bound (1.645).
+    # 1.96 = two-sided 95% ci, same as a one-sided test at 2.5%. standard for non-inferiority
     upper = loss + 1.96 * np.sqrt(var / n)
     return float(np.mean(upper < MARGIN))
 

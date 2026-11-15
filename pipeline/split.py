@@ -1,6 +1,5 @@
-# step 3 of the pipeline (first half, the eval-set draw comes later): put every prompt in train, val or test, by user.
-# reads `prompts` (steps 1-2) and adds a `split` column. router trains on train, the
-# threshold is picked on val, and the reported numbers only ever come from test.
+# puts each prompt in train, val or test by user. train fits the router, val picks the
+# threshold, test is only for the final numbers.
 import hashlib
 
 import duckdb
@@ -9,9 +8,8 @@ DB_PATH = "data/sommelier.duckdb"
 
 
 def split_for(hashed_ip):
-    # whole users go to one split, so a heavy user's similar prompts can't leak from
-    # train into test. md5 instead of python's hash() because hash() changes every run.
-    # 40/20/40: test needs ~2k labeled prompts (see analysis/power.py), val ~1k.
+    # all of a user's prompts go to one split so their lookalike prompts can't leak into test.
+    # md5 not hash(), hash() changes every run. 40/20/40 because test needs ~2k.
     bucket = int(hashlib.md5(hashed_ip.encode()).hexdigest(), 16) % 100
     if bucket < 40:
         return "train"
@@ -22,10 +20,10 @@ def split_for(hashed_ip):
 
 def add_splits(con):
     df = con.execute("select conversation_hash, hashed_ip from prompts").df()
-    # a prompt with no user can't be split by user, fail loudly instead of guessing
+    # can't split by user without a user
     assert df["hashed_ip"].notna().all(), "found prompts with no hashed_ip"
     df["split"] = df["hashed_ip"].apply(split_for)
-    # rebuild instead of altering so a rerun just overwrites
+    # rebuild the table so rerunning just overwrites it
     con.execute("""
         create or replace table prompts as
         select p.conversation_hash, p.hashed_ip, p.timestamp, p.prompt, p.segment, df.split

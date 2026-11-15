@@ -1,4 +1,4 @@
-# tests for pipeline/eval_set.py: sizes land near the target, segment shares match the split, draw is repeatable.
+# eval_set.py: sizes, segment shares, same draw every run
 import duckdb
 import pytest
 

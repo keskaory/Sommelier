@@ -1,4 +1,4 @@
-# tests for pipeline/segments.py: one example per rule, plus the order cases that are easy to break.
+# segments.py: one example per rule plus the order cases that are easy to break
 import duckdb
 import pytest
 
