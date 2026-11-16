@@ -182,3 +182,14 @@ def test_changing_the_token_cap_changes_the_cache_key(monkeypatch):
     before = gen.cache_key("m", "p")
     monkeypatch.setattr(gen, "MAX_TOKENS", 1024)
     assert gen.cache_key("m", "p") != before
+
+
+def test_prompt_that_keeps_500ing_is_skipped_not_cached_and_run_goes_on(con, tmp_path):
+    def broken_on_poem(config, prompt):
+        if prompt == "write a poem":
+            raise http_error(500)
+        return fake_ok(config, prompt)
+
+    gen.generate(con, "small", call=broken_on_poem, cache_dir=str(tmp_path))
+    cached = [json.loads(line)["conversation_hash"] for line in open(tmp_path / "small.jsonl")]
+    assert cached == ["a"]  # b not cached, so the next run tries it again

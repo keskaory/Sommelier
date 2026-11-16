@@ -27,6 +27,11 @@ class StopRun(Exception):
     pass
 
 
+class SkipPrompt(Exception):
+    # google 500s the same prompt over and over. skip it without caching so the next run tries again
+    pass
+
+
 def model_config(role):
     load_dotenv()
     prefix = role.upper()
@@ -125,6 +130,8 @@ def answer_one(config, prompt, call):
             return parse_response(data)
         if attempt < MAX_RETRIES - 1:
             time.sleep(wait_seconds(error, attempt))
+    if isinstance(error, urllib.error.HTTPError) and error.code >= 500:
+        raise SkipPrompt(last_seen)
     raise StopRun(f"still rate limited or the server is down. last error: {last_seen}")
 
 
@@ -164,6 +171,7 @@ def run_calls(role, rows, limit=None, call=call_chat, cache_dir=CACHE_DIR):
     # every 60/rpm seconds and keep up to `workers` in flight. only this thread writes the cache.
     # ctrl-c waits for the calls in flight and those answers aren't saved, that's fine
     stop_reason = None
+    skipped = 0
     running = {}
     next_todo = iter(todo)
     with ThreadPoolExecutor(max_workers=config["workers"]) as pool:
@@ -184,10 +192,15 @@ def run_calls(role, rows, limit=None, call=call_chat, cache_dir=CACHE_DIR):
                 except StopRun as e:
                     stop_reason = str(e)  # let the calls already running finish, start no more
                     continue
+                except SkipPrompt:
+                    skipped += 1
+                    continue
                 key = cache_key(config["model"], prompt)
                 record = {"key": key, "conversation_hash": conversation_hash, "model": config["model"], **result}
                 append_cache(cache_path, record)
                 cache[key] = record
+    if skipped:
+        print(f"skipped {skipped} prompts that kept getting 500s, rerun to retry them")
     if stop_reason is not None:
         print(f"stopped: {stop_reason}. rerun later, the cache picks up where this left off.")
     return cache, config["model"]
